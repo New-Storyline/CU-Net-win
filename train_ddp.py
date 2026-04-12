@@ -81,11 +81,12 @@ def train(gpu, args):
 
     # INITIALIZE
     torch.cuda.set_device(gpu)
-    backend = 'gloo' if os.name == 'nt' else 'nccl'
-    dist.init_process_group(backend=backend, init_method='env://', world_size=args.num_gpus, rank=gpu)
+    if not args.no_multiprocessing:
+        backend = 'gloo' if os.name == 'nt' else 'nccl'
+        dist.init_process_group(backend=backend, init_method='env://', world_size=args.num_gpus, rank=gpu)
 
     # MINIMIZE RANDOMNESS
-    rank = torch.distributed.get_rank()
+    rank = 0 if args.no_multiprocessing else torch.distributed.get_rank()
     torch.manual_seed(config.seed + rank)
     torch.cuda.manual_seed(config.seed + rank)
     torch.cuda.manual_seed_all(config.seed + rank)
@@ -124,22 +125,32 @@ def train(gpu, args):
     # DATASET
     if gpu == 0:
         print(emoji.emojize('Prepare data... :writing_hand:', variant="emoji_type"))
-    batch_size = args.batch_size // args.num_gpus
+    batch_size = args.batch_size if args.no_multiprocessing else args.batch_size // args.num_gpus
     data_train = KittiDepth('train', args)
-    sampler_train = DistributedSampler(data_train)
-    loader_train = torch.utils.data.DataLoader(data_train, batch_size=batch_size,
-                                               shuffle=False, num_workers=args.num_threads,
-                                               pin_memory=True, sampler=sampler_train, drop_last=True)
+    if args.no_multiprocessing:
+        loader_train = torch.utils.data.DataLoader(data_train, batch_size=batch_size,
+                                                   shuffle=True, num_workers=args.num_threads,
+                                                   pin_memory=True, drop_last=True)
+    else:
+        sampler_train = DistributedSampler(data_train)
+        loader_train = torch.utils.data.DataLoader(data_train, batch_size=batch_size,
+                                                   shuffle=False, num_workers=args.num_threads,
+                                                   pin_memory=True, sampler=sampler_train, drop_last=True)
     if gpu == 0:
-        len_train_dataset = len(loader_train) * batch_size * args.num_gpus
+        len_train_dataset = len(loader_train) * batch_size * (1 if args.no_multiprocessing else args.num_gpus)
         print('=> Train dataset: {} samples'.format(len_train_dataset))
     data_val = KittiDepth('val', args)
-    sampler_val = SequentialDistributedSampler(data_val, batch_size=batch_size)
-    loader_val = torch.utils.data.DataLoader(data_val, batch_size=batch_size,
-                                             shuffle=False, num_workers=args.num_threads,
-                                             pin_memory=True, sampler=sampler_val)
+    if args.no_multiprocessing:
+        loader_val = torch.utils.data.DataLoader(data_val, batch_size=batch_size,
+                                                 shuffle=False, num_workers=args.num_threads,
+                                                 pin_memory=True)
+    else:
+        sampler_val = SequentialDistributedSampler(data_val, batch_size=batch_size)
+        loader_val = torch.utils.data.DataLoader(data_val, batch_size=batch_size,
+                                                 shuffle=False, num_workers=args.num_threads,
+                                                 pin_memory=True, sampler=sampler_val)
     if gpu == 0:
-        len_val_dataset = len(loader_val) * batch_size * args.num_gpus
+        len_val_dataset = len(loader_val) * batch_size * (1 if args.no_multiprocessing else args.num_gpus)
         print('=> Val dataset: {} samples'.format(len_val_dataset))
 
     # NETWORK
@@ -155,10 +166,11 @@ def train(gpu, args):
             checkpoint = torch.load(args.pretrain)
             net.load_state_dict(checkpoint['net'])
             print('=> Load network parameters from : {}'.format(args.pretrain))
-    if args.syncbn:
+    if args.syncbn and not args.no_multiprocessing:
         net = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net)
     net.cuda(gpu)
-    net = DDP(net, device_ids=[gpu], output_device=gpu)
+    if not args.no_multiprocessing:
+        net = DDP(net, device_ids=[gpu], output_device=gpu)
 
     # OPTIMIZER
     if gpu == 0:
@@ -244,7 +256,8 @@ def train(gpu, args):
 
         # TRAIN
         net.train()
-        loader_train.sampler.set_epoch(epoch)
+        if not args.no_multiprocessing:
+            loader_train.sampler.set_epoch(epoch)
 
         # LOG
         if gpu == 0:
@@ -256,7 +269,7 @@ def train(gpu, args):
             print('=======> Epoch {:5d} / {:5d} | Lr : {} | {} | {} <======='.format(
                 epoch, args.epochs, list_lr, current_time, args.save_dir
             ))
-            num_sample = len(loader_train) * loader_train.batch_size * args.num_gpus
+            num_sample = len(loader_train) * loader_train.batch_size * (1 if args.no_multiprocessing else args.num_gpus)
             pbar = tqdm(total=num_sample)
             log_cnt = 0.0
             log_loss = 0.0
@@ -330,18 +343,18 @@ def train(gpu, args):
                         list_lr.append(round(g['lr'], 6))
                     error_str = '{} | Lr Warm Up : {}'.format(error_str, list_lr)
                 pbar.set_description(error_str)
-                pbar.update(loader_train.batch_size * args.num_gpus)
+                pbar.update(loader_train.batch_size * (1 if args.no_multiprocessing else args.num_gpus))
 
             # VAL IF NEED
             if (epoch <= args.val_epoch and batch == len(loader_train) - 1) or (
-                    epoch > args.val_epoch and (batch + 1) % (args.val_iters // (loader_train.batch_size * args.num_gpus)) == 0):
+                    epoch > args.val_epoch and (batch + 1) % (args.val_iters // (loader_train.batch_size * (1 if args.no_multiprocessing else args.num_gpus))) == 0):
                 # ENVIRONMENT SETTING
                 torch.set_grad_enabled(False)
                 net.eval()
 
                 # LOG
                 if gpu == 0:
-                    num_sample_val = len(loader_val) * loader_val.batch_size * args.num_gpus
+                    num_sample_val = len(loader_val) * loader_val.batch_size * (1 if args.no_multiprocessing else args.num_gpus)
                     pbar_val = tqdm(total=num_sample_val)
                     log_cnt_val = 0.0
                     log_loss_val = 0.0
@@ -388,12 +401,16 @@ def train(gpu, args):
                         error_str = '{}|Lb={:.4f}|Lj={:.4f}|La={:.4f}'.format(
                             'Val', loss_sum_ben_val.item(), loss_sum_jin_val.item(), loss_sum_an_val.item())
                         pbar_val.set_description(error_str)
-                        pbar_val.update(loader_val.batch_size * args.num_gpus)
+                        pbar_val.update(loader_val.batch_size * (1 if args.no_multiprocessing else args.num_gpus))
 
-                loss_ben_val_all = distributed_concat(torch.cat(loss_ben_val_list, axis=0),
-                                                  len(loader_val.dataset))
-                metric_ben_val_all = distributed_concat(torch.cat(metric_ben_val_list, axis=0),
-                                                    len(loader_val.dataset))
+                if args.no_multiprocessing:
+                    loss_ben_val_all = torch.cat(loss_ben_val_list, axis=0)
+                    metric_ben_val_all = torch.cat(metric_ben_val_list, axis=0)
+                else:
+                    loss_ben_val_all = distributed_concat(torch.cat(loss_ben_val_list, axis=0),
+                                                      len(loader_val.dataset))
+                    metric_ben_val_all = distributed_concat(torch.cat(metric_ben_val_list, axis=0),
+                                                        len(loader_val.dataset))
                 if gpu == 0:
                     pbar_val.close()
                     for i, j in zip(loss_ben_val_all, metric_ben_val_all):
@@ -402,10 +419,14 @@ def train(gpu, args):
                                                    online_loss=args.ben_online_loss, online_metric=args.ben_online_metric,
                                                    online_rmse_only=args.ben_online_rmse_only, online_img=args.ben_online_img)
                 if args.summary_jin:
-                    loss_jin_val_all = distributed_concat(torch.cat(loss_jin_val_list, axis=0),
-                                                          len(loader_val.dataset))
-                    metric_jin_val_all = distributed_concat(torch.cat(metric_jin_val_list, axis=0),
-                                                            len(loader_val.dataset))
+                    if args.no_multiprocessing:
+                        loss_jin_val_all = torch.cat(loss_jin_val_list, axis=0)
+                        metric_jin_val_all = torch.cat(metric_jin_val_list, axis=0)
+                    else:
+                        loss_jin_val_all = distributed_concat(torch.cat(loss_jin_val_list, axis=0),
+                                                              len(loader_val.dataset))
+                        metric_jin_val_all = distributed_concat(torch.cat(metric_jin_val_list, axis=0),
+                                                                len(loader_val.dataset))
                     if gpu == 0:
                         for i, j in zip(loss_jin_val_all, metric_jin_val_all):
                             writer_jin_val.add(i.unsqueeze(0), j.unsqueeze(0))
@@ -415,10 +436,14 @@ def train(gpu, args):
                                                                online_rmse_only=args.jin_online_rmse_only,
                                                                online_img=args.jin_online_img)
                 if args.summary_an:
-                    loss_an_val_all = distributed_concat(torch.cat(loss_an_val_list, axis=0),
-                                                          len(loader_val.dataset))
-                    metric_an_val_all = distributed_concat(torch.cat(metric_an_val_list, axis=0),
-                                                            len(loader_val.dataset))
+                    if args.no_multiprocessing:
+                        loss_an_val_all = torch.cat(loss_an_val_list, axis=0)
+                        metric_an_val_all = torch.cat(metric_an_val_list, axis=0)
+                    else:
+                        loss_an_val_all = distributed_concat(torch.cat(loss_an_val_list, axis=0),
+                                                              len(loader_val.dataset))
+                        metric_an_val_all = distributed_concat(torch.cat(metric_an_val_list, axis=0),
+                                                                len(loader_val.dataset))
                     if gpu == 0:
                         for i, j in zip(loss_an_val_all, metric_an_val_all):
                             writer_an_val.add(i.unsqueeze(0), j.unsqueeze(0))
@@ -436,7 +461,7 @@ def train(gpu, args):
                     else:
                         val_metric = ben_val_metric
 
-                    tmp = args.val_iters // (loader_train.batch_size * args.num_gpus)
+                    tmp = args.val_iters // (loader_train.batch_size * (1 if args.no_multiprocessing else args.num_gpus))
                     if (epoch <= args.val_epoch and batch == len(loader_train) - 1) or (epoch > args.val_epoch
                         and batch + 1 == (len(loader_train) // tmp) * tmp):
                         writer_ben_val.save(epoch, batch + 1, sample_val, output_val)
@@ -444,7 +469,7 @@ def train(gpu, args):
                     if val_metric < best_metric:
                         best_metric = val_metric
                         state = {
-                            'net': net.module.state_dict(),
+                            'net': (net.state_dict() if args.no_multiprocessing else net.module.state_dict()),
                             'optimizer': optimizer.state_dict(),
                             'scheduler': scheduler.state_dict(),
                             'epoch': epoch,
@@ -471,7 +496,7 @@ def train(gpu, args):
                                             online_loss=args.an_online_loss, online_metric=args.an_online_metric,
                                             online_rmse_only=args.an_online_rmse_only, online_img=args.an_online_img)
             state = {
-                'net': net.module.state_dict(),
+                'net': (net.state_dict() if args.no_multiprocessing else net.module.state_dict()),
                 'optimizer': optimizer.state_dict(),
                 'scheduler': scheduler.state_dict(),
                 'epoch': epoch,
