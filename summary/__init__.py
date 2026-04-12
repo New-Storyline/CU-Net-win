@@ -6,6 +6,7 @@
 # ------------------------------------------------------------
 # ------------------------------------------------------------
 
+import os
 from importlib import import_module
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -23,7 +24,7 @@ def get(args):
 
 class BaseSummary(SummaryWriter):
     def __init__(self, log_dir, mode, args):
-        super(BaseSummary, self).__init__(log_dir=log_dir + '/' + mode)
+        super(BaseSummary, self).__init__(log_dir=os.path.join(log_dir, mode))
 
         self.log_dir = log_dir
         self.mode = mode

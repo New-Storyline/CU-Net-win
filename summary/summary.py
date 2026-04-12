@@ -120,7 +120,7 @@ class Summary(BaseSummary):
             f_metric.close()
 
             if self.args.test:
-                f_metric = open(os.path.join(self.args.test_dir + '/test/result_metric.txt'), 'a')
+                f_metric = open(os.path.join(self.args.test_dir, 'test', 'result_metric.txt'), 'a')
                 f_metric.write('\n{:04d} | {}\n'.format(global_step, msg))
                 f_metric.close()
 

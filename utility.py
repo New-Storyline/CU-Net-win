@@ -99,7 +99,8 @@ def backup_source_code(backup_directory):
         shutil.rmtree(backup_directory)
 
     shutil.copytree('.', backup_directory, ignore=ignore_hidden)
-    os.system("chmod -R g+w {}".format(backup_directory))
+    if os.name != 'nt':
+        os.system("chmod -R g+w {}".format(backup_directory))
 
 def check_args(args):
     if args.batch_size < args.num_gpus:

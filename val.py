@@ -79,8 +79,8 @@ def test(args):
         if not os.path.isdir(args.test_dir):
             os.makedirs(args.test_dir)
         os.makedirs(args.test_dir, exist_ok=True)
-        os.makedirs(args.test_dir + '/test', exist_ok=True)
-        metric_txt_dir = os.path.join(args.test_dir + '/test/result_metric.txt')
+        os.makedirs(os.path.join(args.test_dir, 'test'), exist_ok=True)
+        metric_txt_dir = os.path.join(args.test_dir, 'test', 'result_metric.txt')
         with open(metric_txt_dir, 'w') as f:
             f.write('test_model: {} \ntest_option: {} \nval:{} \ntest_name: {} \n'
                     'test_not_random_crop: {} \n'
@@ -159,7 +159,7 @@ def test(args):
             depth_validpoint_number_clear = count_validpoint(samplep['dep'])
 
             with open(metric_txt_dir, 'a') as f:
-                f.write('{}; RMSE:{}; MAE:{}; vp_pre:{}; vp_post:{}\n'.format(samplep['d_path'][0].split('/')[-1],
+                f.write('{}; RMSE:{}; MAE:{}; vp_pre:{}; vp_post:{}\n'.format(os.path.basename(samplep['d_path'][0]),
                                                                          metric_test.data.cpu().numpy()[0, 0]*1000,
                                                                          metric_test.data.cpu().numpy()[0, 1]*1000,
                                                                          depth_validpoint_number,

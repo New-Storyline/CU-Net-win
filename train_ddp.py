@@ -81,7 +81,8 @@ def train(gpu, args):
 
     # INITIALIZE
     torch.cuda.set_device(gpu)
-    dist.init_process_group(backend='nccl', init_method='env://', world_size=args.num_gpus, rank=gpu)
+    backend = 'gloo' if os.name == 'nt' else 'nccl'
+    dist.init_process_group(backend=backend, init_method='env://', world_size=args.num_gpus, rank=gpu)
 
     # MINIMIZE RANDOMNESS
     rank = torch.distributed.get_rank()
@@ -103,7 +104,7 @@ def train(gpu, args):
             args.defrost()
             args.save_dir = os.path.split(wandb.run.dir)[0]
             args.freeze()
-            with open(args.save_dir + '/' + 'config.txt', 'w') as f:
+            with open(os.path.join(args.save_dir, 'config.txt'), 'w') as f:
                 f.write(args.dump())
     if gpu == 0:
         if args.pretrain is not None:
@@ -223,12 +224,12 @@ def train(gpu, args):
 
     if gpu == 0:
         log_itr = args.log_itr
-        backup_source_code(args.save_dir + '/backup_code')
+        backup_source_code(os.path.join(args.save_dir, 'backup_code'))
         try:
             assert os.path.isdir(args.save_dir)
             os.makedirs(args.save_dir, exist_ok=True)
-            os.makedirs(args.save_dir + '/train', exist_ok=True)
-            os.makedirs(args.save_dir + '/val', exist_ok=True)
+            os.makedirs(os.path.join(args.save_dir, 'train'), exist_ok=True)
+            os.makedirs(os.path.join(args.save_dir, 'val'), exist_ok=True)
         except OSError:
             pass
         print('=> Save backup source code and makedirs done')
@@ -450,7 +451,7 @@ def train(gpu, args):
                             'log_itr': log_itr,
                             'args': args
                         }
-                        torch.save(state, '{}/best_model.pt'.format(args.save_dir))
+                        torch.save(state, os.path.join(args.save_dir, 'best_model.pt'))
                     log_val += 1
                 torch.set_grad_enabled(True)
                 net.train()
@@ -477,7 +478,7 @@ def train(gpu, args):
                 'log_itr': log_itr,
                 'args': args
             }
-            torch.save(state, '{}/latest_model.pt'.format(args.save_dir))
+            torch.save(state, os.path.join(args.save_dir, 'latest_model.pt'))
         scheduler.step()
 
 
