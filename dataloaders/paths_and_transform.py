@@ -211,6 +211,59 @@ def get_paths_and_transform(split, args):
 
     return items, transform
 
+def _crop_array(arr, h, rheight, j, rwidth):
+    if arr is None:
+        return None
+    if arr.ndim == 3:
+        return arr[h - rheight:h, j:j + rwidth, :]
+    elif arr.ndim == 2:
+        return arr[h - rheight:h, j:j + rwidth]
+    return arr
+
+
+def _try_apply(arr, transform_fn):
+    if arr is not None:
+        return transform_fn(arr)
+    return None
+
+
+def _apply_transform_all(transform_fn, sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position):
+    return (
+        _try_apply(sparse, transform_fn),
+        _try_apply(gt, transform_fn),
+        _try_apply(ipbasicgt, transform_fn),
+        _try_apply(penetgt, transform_fn),
+        _try_apply(s2dgt, transform_fn),
+        _try_apply(rgb, transform_fn),
+        _try_apply(structure, transform_fn),
+        _try_apply(position, transform_fn),
+    )
+
+
+def _random_crop_all(h, w, rheight, rwidth, sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position):
+    j = int(torch.FloatTensor(1).uniform_(0, w - rwidth + 1).item())
+    return (
+        _crop_array(sparse, h, rheight, j, rwidth),
+        _crop_array(gt, h, rheight, j, rwidth),
+        _crop_array(ipbasicgt, h, rheight, j, rwidth),
+        _crop_array(penetgt, h, rheight, j, rwidth),
+        _crop_array(s2dgt, h, rheight, j, rwidth),
+        _crop_array(rgb, h, rheight, j, rwidth),
+        _crop_array(structure, h, rheight, j, rwidth),
+        _crop_array(position, h, rheight, j, rwidth),
+    )
+
+
+def _make_jitter_transform(args, geometric_transform):
+    brightness = torch.FloatTensor(1).uniform_(max(0, 1 - args.jitter), 1 + args.jitter).item()
+    contrast = torch.FloatTensor(1).uniform_(max(0, 1 - args.jitter), 1 + args.jitter).item()
+    saturation = torch.FloatTensor(1).uniform_(max(0, 1 - args.jitter), 1 + args.jitter).item()
+    return transforms.Compose([
+        transforms.ColorJitter(brightness, contrast, saturation, 0),
+        geometric_transform
+    ])
+
+
 def train_transform(sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position, args):
     # s = np.random.uniform(1.0, 1.5) # random scaling
     # angle = np.random.uniform(-5.0, 5.0) # random rotation degrees
@@ -237,294 +290,50 @@ def train_transform(sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, posit
 
     transform_geometric = transforms.Compose(transforms_list)
 
-    if sparse is not None:
-        sparse = transform_geometric(sparse)
-    if gt is not None:
-        gt = transform_geometric(gt)
-    if ipbasicgt is not None:
-        ipbasicgt = transform_geometric(ipbasicgt)
-    if penetgt is not None:
-        penetgt = transform_geometric(penetgt)
-    if s2dgt is not None:
-        s2dgt = transform_geometric(s2dgt)
-    if rgb is not None:
-        # brightness = np.random.uniform(max(0, 1 - args.jitter),
-        #                                1 + args.jitter)
-        # contrast = np.random.uniform(max(0, 1 - args.jitter), 1 + args.jitter)
-        # saturation = np.random.uniform(max(0, 1 - args.jitter),
-        #                                1 + args.jitter)
-
-        brightness = torch.FloatTensor(1).uniform_(max(0, 1 - args.jitter),
-                                                   1 + args.jitter).item()
-        contrast = torch.FloatTensor(1).uniform_(max(0, 1 - args.jitter), 1 + args.jitter).item()
-        saturation = torch.FloatTensor(1).uniform_(max(0, 1 - args.jitter),
-                                                   1 + args.jitter).item()
-
-        transform_rgb = transforms.Compose([
-            transforms.ColorJitter(brightness, contrast, saturation, 0),
-            transform_geometric
-        ])
-        rgb = transform_rgb(rgb)
-    if structure is not None:
-        # brightness = np.random.uniform(max(0, 1 - args.jitter),
-        #                                1 + args.jitter)
-        # contrast = np.random.uniform(max(0, 1 - args.jitter), 1 + args.jitter)
-        # saturation = np.random.uniform(max(0, 1 - args.jitter),
-        #                                1 + args.jitter)
-
-        brightness = torch.FloatTensor(1).uniform_(max(0, 1 - args.jitter),
-                                                   1 + args.jitter).item()
-        contrast = torch.FloatTensor(1).uniform_(max(0, 1 - args.jitter), 1 + args.jitter).item()
-        saturation = torch.FloatTensor(1).uniform_(max(0, 1 - args.jitter),
-                                                   1 + args.jitter).item()
-
-        transform_structure = transforms.Compose([
-            transforms.ColorJitter(brightness, contrast, saturation, 0),
-            transform_geometric
-        ])
-        structure = transform_structure(structure)
+    sparse = _try_apply(sparse, transform_geometric)
+    gt = _try_apply(gt, transform_geometric)
+    ipbasicgt = _try_apply(ipbasicgt, transform_geometric)
+    penetgt = _try_apply(penetgt, transform_geometric)
+    s2dgt = _try_apply(s2dgt, transform_geometric)
+    rgb = _try_apply(rgb, _make_jitter_transform(args, transform_geometric))
+    structure = _try_apply(structure, _make_jitter_transform(args, transform_geometric))
     # sparse = drop_depth_measurements(sparse, 0.9)
 
-    if position is not None:
-        bottom_crop_only = transforms.Compose([transforms.BottomCrop((oheight, owidth))])
-        position = bottom_crop_only(position)
+    position = _try_apply(position,
+        transforms.Compose([transforms.BottomCrop((oheight, owidth))]))
 
     # random crop
-    # if small_training == True:
     if not args.not_random_crop:
-        h = oheight
-        w = owidth
-        rheight = args.random_crop_height
-        rwidth = args.random_crop_width
-        # randomlize
-        # i = np.random.randint(0, h - rheight + 1)
-        # j = np.random.randint(0, w - rwidth + 1)
-
-        # i = int(torch.FloatTensor(1).uniform_(0, h - rheight + 1).item())
-        # FIXME j=0
-        j = int(torch.FloatTensor(1).uniform_(0, w - rwidth + 1).item())
-
-        if rgb is not None:
-            if rgb.ndim == 3:
-                rgb = rgb[h-rheight:h, j:j + rwidth, :]
-            elif rgb.ndim == 2:
-                rgb = rgb[h-rheight:h, j:j + rwidth]
-                
-        if structure is not None:
-            if structure.ndim == 3:
-                structure = structure[h-rheight:h, j:j + rwidth, :]
-            elif structure.ndim == 2:
-                structure = structure[h-rheight:h, j:j + rwidth]
-
-        if sparse is not None:
-            if sparse.ndim == 3:
-                sparse = sparse[h-rheight:h, j:j + rwidth, :]
-            elif sparse.ndim == 2:
-                sparse = sparse[h-rheight:h, j:j + rwidth]
-
-        if gt is not None:
-            if gt.ndim == 3:
-                gt = gt[h-rheight:h, j:j + rwidth, :]
-            elif gt.ndim == 2:
-                gt = gt[h-rheight:h, j:j + rwidth]
-                
-        if ipbasicgt is not None:
-            if ipbasicgt.ndim == 3:
-                ipbasicgt = ipbasicgt[h-rheight:h, j:j + rwidth, :]
-            elif ipbasicgt.ndim == 2:
-                ipbasicgt = ipbasicgt[h-rheight:h, j:j + rwidth]
-        
-        if penetgt is not None:
-            if penetgt.ndim == 3:
-                penetgt = penetgt[h-rheight:h, j:j + rwidth, :]
-            elif penetgt.ndim == 2:
-                penetgt = penetgt[h-rheight:h, j:j + rwidth]
-        
-        if s2dgt is not None:
-            if s2dgt.ndim == 3:
-                s2dgt = s2dgt[h-rheight:h, j:j + rwidth, :]
-            elif s2dgt.ndim == 2:
-                s2dgt = s2dgt[h-rheight:h, j:j + rwidth]
-
-        if position is not None:
-            if position.ndim == 3:
-                position = position[h-rheight:h, j:j + rwidth, :]
-            elif position.ndim == 2:
-                position = position[h-rheight:h, j:j + rwidth]
+        sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position = \
+            _random_crop_all(oheight, owidth, args.random_crop_height, args.random_crop_width,
+                             sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position)
 
     return sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position
+
+def _crop_and_optional_random(sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position, args, skip_random_crop):
+    oheight = args.val_h
+    owidth = args.val_w
+
+    transform_ = transforms.Compose([transforms.BottomCrop((oheight, owidth))])
+    sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position = \
+        _apply_transform_all(transform_, sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position)
+
+    if not skip_random_crop:
+        sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position = \
+            _random_crop_all(oheight, owidth, args.random_crop_height, args.random_crop_width,
+                             sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position)
+
+    return sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position
+
 
 def val_transform(sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position, args):
-    oheight = args.val_h
-    owidth = args.val_w
+    return _crop_and_optional_random(
+        sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position, args, args.val_not_random_crop)
 
-    transform_ = transforms.Compose([
-        transforms.BottomCrop((oheight, owidth)),
-    ])
-    if rgb is not None:
-        rgb = transform_(rgb)
-    if structure is not None:
-        structure = transform_(structure)
-    if sparse is not None:
-        sparse = transform_(sparse)
-    if gt is not None:
-        gt = transform_(gt)
-    if ipbasicgt is not None:
-        ipbasicgt = transform_(ipbasicgt)
-    if penetgt is not None:
-        penetgt = transform_(penetgt)
-    if s2dgt is not None:
-        s2dgt = transform_(s2dgt)
-    if position is not None:
-        position = transform_(position)
-
-    if not args.val_not_random_crop:
-        h = oheight
-        w = owidth
-        rheight = args.random_crop_height
-        rwidth = args.random_crop_width
-        # randomlize
-        # i = np.random.randint(0, h - rheight + 1)
-        # j = np.random.randint(0, w - rwidth + 1)
-
-        # i = int(torch.FloatTensor(1).uniform_(0, h - rheight + 1).item())
-        j = int(torch.FloatTensor(1).uniform_(0, w - rwidth + 1).item())
-
-        if rgb is not None:
-            if rgb.ndim == 3:
-                rgb = rgb[h - rheight:h, j:j + rwidth, :]
-            elif rgb.ndim == 2:
-                rgb = rgb[h - rheight:h, j:j + rwidth]
-
-        if structure is not None:
-            if structure.ndim == 3:
-                structure = structure[h - rheight:h, j:j + rwidth, :]
-            elif structure.ndim == 2:
-                structure = structure[h - rheight:h, j:j + rwidth]
-
-        if sparse is not None:
-            if sparse.ndim == 3:
-                sparse = sparse[h - rheight:h, j:j + rwidth, :]
-            elif sparse.ndim == 2:
-                sparse = sparse[h - rheight:h, j:j + rwidth]
-
-        if gt is not None:
-            if gt.ndim == 3:
-                gt = gt[h - rheight:h, j:j + rwidth, :]
-            elif gt.ndim == 2:
-                gt = gt[h - rheight:h, j:j + rwidth]
-        
-        if ipbasicgt is not None:
-            if ipbasicgt.ndim == 3:
-                ipbasicgt = ipbasicgt[h - rheight:h, j:j + rwidth, :]
-            elif ipbasicgt.ndim == 2:
-                ipbasicgt = ipbasicgt[h - rheight:h, j:j + rwidth]
-
-        if penetgt is not None:
-            if penetgt.ndim == 3:
-                penetgt = penetgt[h - rheight:h, j:j + rwidth, :]
-            elif penetgt.ndim == 2:
-                penetgt = penetgt[h - rheight:h, j:j + rwidth]
-
-        if s2dgt is not None:
-            if s2dgt.ndim == 3:
-                s2dgt = s2dgt[h - rheight:h, j:j + rwidth, :]
-            elif s2dgt.ndim == 2:
-                s2dgt = s2dgt[h - rheight:h, j:j + rwidth]
-
-        if position is not None:
-            if position.ndim == 3:
-                position = position[h - rheight:h, j:j + rwidth, :]
-            elif position.ndim == 2:
-                position = position[h - rheight:h, j:j + rwidth]
-
-    return sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position
 
 def test_transform(sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position, args):
-    oheight = args.val_h
-    owidth = args.val_w
-
-    transform_ = transforms.Compose([
-        transforms.BottomCrop((oheight, owidth)),
-    ])
-    if rgb is not None:
-        rgb = transform_(rgb)
-    if structure is not None:
-        structure = transform_(structure)
-    if sparse is not None:
-        sparse = transform_(sparse)
-    if gt is not None:
-        gt = transform_(gt)
-    if ipbasicgt is not None:
-        ipbasicgt = transform_(ipbasicgt)
-    if penetgt is not None:
-        penetgt = transform_(penetgt)
-    if s2dgt is not None:
-        s2dgt = transform_(s2dgt)
-    if position is not None:
-        position = transform_(position)
-
-    if not args.test_not_random_crop:
-        h = oheight
-        w = owidth
-        rheight = args.random_crop_height
-        rwidth = args.random_crop_width
-        # randomlize
-        # i = np.random.randint(0, h - rheight + 1)
-        # j = np.random.randint(0, w - rwidth + 1)
-
-        # i = int(torch.FloatTensor(1).uniform_(0, h - rheight + 1).item())
-        j = int(torch.FloatTensor(1).uniform_(0, w - rwidth + 1).item())
-
-        if rgb is not None:
-            if rgb.ndim == 3:
-                rgb = rgb[h - rheight:h, j:j + rwidth, :]
-            elif rgb.ndim == 2:
-                rgb = rgb[h - rheight:h, j:j + rwidth]
-
-        if structure is not None:
-            if structure.ndim == 3:
-                structure = structure[h - rheight:h, j:j + rwidth, :]
-            elif structure.ndim == 2:
-                structure = structure[h - rheight:h, j:j + rwidth]
-
-        if sparse is not None:
-            if sparse.ndim == 3:
-                sparse = sparse[h - rheight:h, j:j + rwidth, :]
-            elif sparse.ndim == 2:
-                sparse = sparse[h - rheight:h, j:j + rwidth]
-
-        if gt is not None:
-            if gt.ndim == 3:
-                gt = gt[h - rheight:h, j:j + rwidth, :]
-            elif gt.ndim == 2:
-                gt = gt[h - rheight:h, j:j + rwidth]
-
-        if ipbasicgt is not None:
-            if ipbasicgt.ndim == 3:
-                ipbasicgt = ipbasicgt[h - rheight:h, j:j + rwidth, :]
-            elif ipbasicgt.ndim == 2:
-                ipbasicgt = ipbasicgt[h - rheight:h, j:j + rwidth]
-
-        if penetgt is not None:
-            if penetgt.ndim == 3:
-                penetgt = penetgt[h - rheight:h, j:j + rwidth, :]
-            elif penetgt.ndim == 2:
-                penetgt = penetgt[h - rheight:h, j:j + rwidth]
-
-        if s2dgt is not None:
-            if s2dgt.ndim == 3:
-                s2dgt = s2dgt[h - rheight:h, j:j + rwidth, :]
-            elif s2dgt.ndim == 2:
-                s2dgt = s2dgt[h - rheight:h, j:j + rwidth]
-
-        if position is not None:
-            if position.ndim == 3:
-                position = position[h - rheight:h, j:j + rwidth, :]
-            elif position.ndim == 2:
-                position = position[h - rheight:h, j:j + rwidth]
-
-    return sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position
+    return _crop_and_optional_random(
+        sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position, args, args.test_not_random_crop)
 
 def no_transform(sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position, args):
     return sparse, gt, ipbasicgt, penetgt, s2dgt, rgb, structure, position
