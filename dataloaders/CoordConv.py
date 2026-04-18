@@ -12,7 +12,15 @@ from __future__ import print_function
 import numpy as np
 
 class AddCoordsNp():
-	"""Add coords to a tensor"""
+	"""
+	Creates coordinate channels with the same size as the input tensor, which can be concatenated to the input tensor.
+	- It takes the dimensions x_dim and y_dim, i.e., the height and width.
+	- Creates 2 channels:
+		- xx_channel: the horizontal coordinate for each pixel
+		- yy_channel: the vertical coordinate for each pixel
+	- Normalizes the coordinate values to the range [-1, 1]
+	- Concatenates in tensor (H, W, 2)
+	"""
 	def __init__(self, x_dim=64, y_dim=64, with_r=False):
 		self.x_dim = x_dim
 		self.y_dim = y_dim
