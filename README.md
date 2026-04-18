@@ -2,8 +2,8 @@
 
 This repository contains modifications to the original implementation of the CU-Net approach for use on Windows.
 The following changes are planned:
-- [ ] Completely remove training parallelization.
-- [ ] Remove functions that only work on Linux.
+- [ ] Make parallelization optional.
+- [ ] Improve cross-platform compatibility.
 - [ ] Update the configuration file to reflect these changes.
 
 ## Introduction
