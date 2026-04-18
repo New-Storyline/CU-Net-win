@@ -29,8 +29,6 @@ cfg.cudnn_benchmark = True
 cfg.data_folder = ''
 cfg.max_depth = 0.0
 cfg.dataset = ['rgb', 'dep', 'gt', 'penetgt', 's2dgt', 'structure']
-cfg.penetgt_mixed_gt = False
-cfg.s2dgt_mixed_gt = False
 
 cfg.fill_type = 'multiscale'
 cfg.extrapolate = True
@@ -109,8 +107,6 @@ cfg.warm_up = False
 cfg.no_warm_up = True
 
 # Loss
-cfg.loss_fixed = True
-cfg.partial_supervised_index = 0.0
 cfg.loss_ben = ''
 cfg.loss_jin = ''
 cfg.loss_an = ''
@@ -135,7 +131,6 @@ cfg.decay_factor = 0.1
 cfg.vis_step = 10
 cfg.num_summary = 4
 cfg.record_by_wandb_online = True
-cfg.test_record_by_wandb_online = True
 
 cfg.ben_online_loss=True
 cfg.ben_online_metric=True

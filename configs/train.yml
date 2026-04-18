@@ -8,20 +8,18 @@
 
 # Hardware
 seed: 7240
-gpus: (7, )
+gpus: (1, )
 port: 29500
 num_threads: 5
-no_multiprocessing: False
+no_multiprocessing: True
 syncbn: True
 cudnn_deterministic: False
 cudnn_benchmark: True
 
 # Dataset
-data_folder: '/home/temp_user/kitti_depth'
+data_folder: 'datasets/nyu_data/'
 max_depth: 80.0
 dataset: ['rgb', 'dep', 'gt']
-penetgt_mixed_gt: False
-s2dgt_mixed_gt: False
 
 val: 'select'
 val_h: 352
@@ -82,8 +80,6 @@ accumulation_gradient: False
 accumulation_steps: 0
 
 # Loss
-loss_fixed: False
-partial_supervised_index: 0.0
 loss_ben: '1.0*L2'
 loss_jin: '1.0*L2'
 loss_an: '1.0*L2'
@@ -109,7 +105,6 @@ num_summary: 6
 # Logs
 vis_step: 1000
 record_by_wandb_online: False
-test_record_by_wandb_online: False
 
 ben_online_loss: True
 ben_online_metric: True

@@ -76,7 +76,7 @@ class CustomDepthDataset(data.Dataset):
         """
 
         sparse_dirty, gt, rgb_raw, gt_depth_path, rgb_path = self.__getraw__(index)
-        position = CoordConv.AddCoordsNp(self.args.val_h, self.args.val_w)
+        position = CoordConv.AddCoordsNp(self.image_size[0], self.image_size[1])
         position = position.call()
         rgb = rgb_raw
 
@@ -97,5 +97,5 @@ class CustomDepthDataset(data.Dataset):
         return items
 
     def __len__(self):
-        return len(self.paths['gt'])
+        return len(self.paths['gt_depth'])
 
